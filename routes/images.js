@@ -31,6 +31,93 @@ async function ensureDataDirectory() {
   }
 }
 
+/**
+ * Generate optimized Cloudinary URL with transformations
+ * @param {string} publicId - Cloudinary public ID
+ * @param {string} originalUrl - Original Cloudinary URL (fallback)
+ * @param {Object} options - Transformation options
+ * @returns {Object} Object with optimized URLs
+ */
+function generateOptimizedUrls(publicId, originalUrl, options = {}) {
+  const {
+    thumbnail = false,
+    width = 800,
+    quality = 'auto',
+    format = 'auto'
+  } = options;
+
+  // If no publicId, return original URL (for non-Cloudinary images)
+  if (!publicId || !publicId.includes('josh-farewell')) {
+    return {
+      url: originalUrl,
+      thumbnail: originalUrl,
+      lightbox: originalUrl
+    };
+  }
+
+  try {
+    // Base transformations: auto format, auto quality, responsive
+    const baseTransformations = {
+      fetch_format: format, // 'auto' converts to WebP/AVIF when supported
+      quality: quality, // 'auto' optimizes quality based on image
+      flags: 'progressive' // Progressive JPEG loading
+    };
+
+    // Thumbnail for gallery grid (smaller, faster loading)
+    const thumbnailTransforms = {
+      ...baseTransformations,
+      width: 400,
+      height: 400,
+      crop: 'fill',
+      gravity: 'auto'
+    };
+
+    // Gallery view (medium size)
+    const galleryTransforms = {
+      ...baseTransformations,
+      width: width,
+      height: width,
+      crop: 'limit' // Maintain aspect ratio, don't crop
+    };
+
+    // Lightbox/full view (larger but still optimized)
+    const lightboxTransforms = {
+      ...baseTransformations,
+      width: 1200,
+      height: 1200,
+      crop: 'limit'
+    };
+
+    // Generate URLs using Cloudinary URL helper
+    const thumbnailUrl = cloudinary.url(publicId, {
+      transformation: [thumbnailTransforms]
+    });
+
+    const galleryUrl = cloudinary.url(publicId, {
+      transformation: [galleryTransforms]
+    });
+
+    const lightboxUrl = cloudinary.url(publicId, {
+      transformation: [lightboxTransforms]
+    });
+
+    return {
+      url: galleryUrl, // Default URL for gallery
+      thumbnail: thumbnailUrl, // Smaller thumbnail
+      lightbox: lightboxUrl, // Larger for lightbox
+      original: originalUrl // Keep original as fallback
+    };
+  } catch (error) {
+    console.warn('Error generating optimized URLs, using original:', error.message);
+    return {
+      url: originalUrl,
+      thumbnail: originalUrl,
+      lightbox: originalUrl,
+      original: originalUrl
+    };
+  }
+}
+
 // Fetch images from Cloudinary folder
 async function fetchFromCloudinary(folderPath, category) {
   try {
@@ -40,18 +127,33 @@ async function fetchFromCloudinary(folderPath, category) {
       max_results: 500
     });
     
-    return (result.resources || []).map(resource => ({
-      id: resource.public_id?.replace(/\//g, '_') + '_' + (resource.created_at || Date.now()),
-      url: resource.secure_url,
-      publicId: resource.public_id,
-      category: category,
-      caption: '',
-      uploadedAt: resource.created_at ? new Date(resource.created_at).toISOString() : new Date().toISOString(),
-      width: resource.width,
-      height: resource.height,
-      format: resource.format,
-      resourceType: resource.resource_type || 'image'
-    }));
+    return (result.resources || []).map(resource => {
+      const publicId = resource.public_id;
+      const originalUrl = resource.secure_url;
+      
+      // Generate optimized URLs
+      const optimizedUrls = generateOptimizedUrls(publicId, originalUrl, {
+        width: 800,
+        quality: 'auto',
+        format: 'auto'
+      });
+
+      return {
+        id: resource.public_id?.replace(/\//g, '_') + '_' + (resource.created_at || Date.now()),
+        url: optimizedUrls.url, // Optimized gallery URL
+        thumbnail: optimizedUrls.thumbnail, // Thumbnail for grid
+        lightbox: optimizedUrls.lightbox, // Larger for lightbox
+        original: optimizedUrls.original, // Original as fallback
+        publicId: publicId,
+        category: category,
+        caption: '',
+        uploadedAt: resource.created_at ? new Date(resource.created_at).toISOString() : new Date().toISOString(),
+        width: resource.width,
+        height: resource.height,
+        format: resource.format,
+        resourceType: resource.resource_type || 'image'
+      };
+    });
   } catch (error) {
     console.error(`Error fetching from Cloudinary ${folderPath}:`, error.message);
     return [];
@@ -124,6 +226,24 @@ router.get('/', async (req, res) => {
     ['josh', 'family', 'friends'].forEach(arrayCategory => {
       if (images[arrayCategory] && Array.isArray(images[arrayCategory])) {
         result[arrayCategory] = images[arrayCategory].map(image => {
+          // If image doesn't have optimized URLs, generate them
+          if (image.publicId && (!image.thumbnail || !image.lightbox)) {
+            const optimizedUrls = generateOptimizedUrls(image.publicId, image.url || image.original, {
+              width: 800,
+              quality: 'auto',
+              format: 'auto'
+            });
+            
+            return {
+              ...image,
+              url: optimizedUrls.url,
+              thumbnail: image.thumbnail || optimizedUrls.thumbnail,
+              lightbox: image.lightbox || optimizedUrls.lightbox,
+              original: image.original || optimizedUrls.original,
+              category: arrayCategory
+            };
+          }
+          
           // Ensure category property matches the array it's in
           // This is the source of truth for filtering
           return {
@@ -165,7 +285,27 @@ router.get('/:category', async (req, res) => {
     const images = await initializeImagesDatabase();
     
     if (images[category]) {
-      res.json(images[category]);
+      // Optimize URLs if needed
+      const optimizedImages = images[category].map(image => {
+        if (image.publicId && (!image.thumbnail || !image.lightbox)) {
+          const optimizedUrls = generateOptimizedUrls(image.publicId, image.url || image.original, {
+            width: 800,
+            quality: 'auto',
+            format: 'auto'
+          });
+          
+          return {
+            ...image,
+            url: optimizedUrls.url,
+            thumbnail: image.thumbnail || optimizedUrls.thumbnail,
+            lightbox: image.lightbox || optimizedUrls.lightbox,
+            original: image.original || optimizedUrls.original
+          };
+        }
+        return image;
+      });
+      
+      res.json(optimizedImages);
     } else {
       res.json([]);
     }
