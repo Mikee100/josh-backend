@@ -14,7 +14,7 @@ const IMAGES_DB_PATH = join(__dirname, '../data/images.json');
 /**
  * GET /api/images
  * Get all images grouped by category
- * Reorganizes images by their category property to ensure correct categorization
+ * Fixes category property on images to match their array, but keeps images in their original arrays
  */
 router.get('/', async (req, res) => {
   try {
@@ -28,9 +28,9 @@ router.get('/', async (req, res) => {
     const data = await readFile(IMAGES_DB_PATH, 'utf-8');
     const images = JSON.parse(data);
     
-    // Reorganize images by their category property
-    // This fixes cases where images are in the wrong array
-    const reorganized = {
+    // Fix category property on images to match their array, but keep them in original arrays
+    // This ensures frontend can filter correctly using the category property
+    const result = {
       josh: [],
       family: [],
       friends: []
@@ -39,45 +39,24 @@ router.get('/', async (req, res) => {
     // Process each category array
     ['josh', 'family', 'friends'].forEach(arrayCategory => {
       if (images[arrayCategory] && Array.isArray(images[arrayCategory])) {
-        images[arrayCategory].forEach(image => {
-          // Use the image's category property, or fall back to array category
-          let imageCategory = image.category;
-          
-          // If category is missing or invalid, try to detect from URL
-          if (!imageCategory || !['josh', 'family', 'friends'].includes(imageCategory)) {
-            const url = image.url || image.publicId || '';
-            if (url.includes('/josh-farewell/josh/') || url.includes('/josh/')) {
-              imageCategory = 'josh';
-            } else if (url.includes('/josh-farewell/friends/') || url.includes('/friends/')) {
-              imageCategory = 'friends';
-            } else if (url.includes('/josh-farewell/family/') || url.includes('/family/')) {
-              imageCategory = 'family';
-            } else {
-              imageCategory = arrayCategory; // Fallback to array category
-            }
-          }
-          
-          // Ensure category is valid
-          if (!['josh', 'family', 'friends'].includes(imageCategory)) {
-            imageCategory = arrayCategory;
-          }
-          
-          // Add image to correct category with corrected category property
-          reorganized[imageCategory].push({
+        result[arrayCategory] = images[arrayCategory].map(image => {
+          // Ensure category property matches the array it's in
+          // This is the source of truth for filtering
+          return {
             ...image,
-            category: imageCategory
-          });
+            category: arrayCategory
+          };
         });
       }
     });
     
-    console.log('Successfully read and reorganized images:', {
-      josh: reorganized.josh.length,
-      family: reorganized.family.length,
-      friends: reorganized.friends.length
+    console.log('Successfully read images:', {
+      josh: result.josh.length,
+      family: result.family.length,
+      friends: result.friends.length
     });
     
-    res.json(reorganized);
+    res.json(result);
   } catch (error) {
     console.error('Error reading images:', error);
     console.error('Error details:', {
