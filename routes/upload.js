@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile, mkdir } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -119,7 +119,7 @@ router.post('/', upload.any(), async (req, res) => {
       }
     }
 
-    // Read current images database
+    // Read current images database (create default if missing)
     let images;
     try {
       const data = await readFile(IMAGES_DB_PATH, 'utf-8');
@@ -169,6 +169,15 @@ router.post('/', upload.any(), async (req, res) => {
     uploadedImages.forEach(newImage => {
       images[category].push(newImage);
     });
+
+    // Ensure the data directory exists before saving
+    const dataDir = join(__dirname, '../data');
+    try {
+      await mkdir(dataDir, { recursive: true });
+    } catch (dirError) {
+      console.error('Failed to create data directory:', dataDir, dirError);
+      // Continue anyway; writeFile will still throw if it cannot write
+    }
 
     // Save updated database
     await writeFile(IMAGES_DB_PATH, JSON.stringify(images, null, 2));
